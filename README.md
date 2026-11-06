@@ -1,0 +1,1 @@
+# rozproszona-bramka-platnosci
