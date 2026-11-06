@@ -1,0 +1,60 @@
+name: bramka-platnosci
+
+x-wezel: &wezel
+  image: gvenzl/oracle-free:23.26.3
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  healthcheck:
+    test: ["CMD", "healthcheck.sh"]
+    interval: 10s
+    timeout: 5s
+    retries: 10
+    start_period: 5m
+  networks:
+    - siec-wezlow
+
+services:
+  visa-db:
+    <<: *wezel
+    container_name: visa-db
+    environment:
+      ORACLE_PASSWORD: ${VISA_ORACLE_PASSWORD:?brak VISA_ORACLE_PASSWORD w .env}
+      BRAMKA_PASSWORD: ${BRAMKA_PASSWORD:?brak BRAMKA_PASSWORD w .env}
+    ports:
+      - "127.0.0.1:1521:1521"
+    volumes:
+      - ./docker/init:/container-entrypoint-initdb.d:ro
+      - visa-data:/opt/oracle/oradata
+
+  mastercard-db:
+    <<: *wezel
+    container_name: mastercard-db
+    environment:
+      ORACLE_PASSWORD: ${MASTERCARD_ORACLE_PASSWORD:?brak MASTERCARD_ORACLE_PASSWORD w .env}
+      BRAMKA_PASSWORD: ${BRAMKA_PASSWORD:?brak BRAMKA_PASSWORD w .env}
+    ports:
+      - "127.0.0.1:1522:1521"
+    volumes:
+      - ./docker/init:/container-entrypoint-initdb.d:ro
+      - mastercard-data:/opt/oracle/oradata
+
+  amex-db:
+    <<: *wezel
+    container_name: amex-db
+    environment:
+      ORACLE_PASSWORD: ${AMEX_ORACLE_PASSWORD:?brak AMEX_ORACLE_PASSWORD w .env}
+      BRAMKA_PASSWORD: ${BRAMKA_PASSWORD:?brak BRAMKA_PASSWORD w .env}
+    ports:
+      - "127.0.0.1:1523:1521"
+    volumes:
+      - ./docker/init:/container-entrypoint-initdb.d:ro
+      - amex-data:/opt/oracle/oradata
+
+networks:
+  siec-wezlow:
+
+volumes:
+  visa-data:
+  mastercard-data:
+  amex-data:
