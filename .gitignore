@@ -48,3 +48,6 @@ application-local.yml
 ### Logs ###
 *.log
 logs/
+
+# Lokalne nadpisania docker compose (np. inny port przy zajętym 1521)
+docker-compose.override.yml
