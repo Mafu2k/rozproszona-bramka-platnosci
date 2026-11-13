@@ -1,0 +1,63 @@
+spring:
+  application:
+    name: bramka-platnosci
+  config:
+    import: optional:file:../.env[.properties]
+  threads:
+    virtual:
+      enabled: true
+
+server:
+  port: ${PORT:8080}
+  shutdown: graceful
+  error:
+    whitelabel:
+      enabled: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: never
+
+logging:
+  level:
+    org.jpos: warn
+
+bramka:
+  baza:
+    uzytkownik: bramka
+    haslo: ${BRAMKA_PASSWORD}
+    rozmiar-puli: 20
+    czas-polaczenia: 2s
+    czas-zapytania: 5s
+  wezly:
+    - nr: 1
+      kod: VISA
+      url: ${WEZEL_VISA_URL:jdbc:oracle:thin:@//localhost:1521/FREEPDB1}
+    - nr: 2
+      kod: MC
+      url: ${WEZEL_MC_URL:jdbc:oracle:thin:@//localhost:1522/FREEPDB1}
+    - nr: 3
+      kod: AMEX
+      url: ${WEZEL_AMEX_URL:jdbc:oracle:thin:@//localhost:1523/FREEPDB1}
+  bezpieczenstwo:
+    klucz-hmac-karty: ${KARTA_HMAC_KEY}
+    sekret-jwt: ${JWT_SECRET}
+    waznosc-tokenu: 30m
+    dozwolone-zrodla-cors: ${CORS_ORIGINS:http://localhost:5173,http://localhost:3000,http://localhost:4200}
+  wydawanie:
+    biny:
+      VISA: "45391000"
+      MC: "53999100"
+      AMEX: "37971200"
+  uzytkownicy-startowi:
+    haslo-admina: ${PANEL_ADMIN_PASSWORD:}
+    haslo-operatorow: ${PANEL_OPERATOR_PASSWORD:}
+  iso8583:
+    wlaczony: ${ISO8583_WLACZONY:true}
+    port: ${ISO8583_PORT:8583}
+  dane-demo: ${DANE_DEMO:true}
