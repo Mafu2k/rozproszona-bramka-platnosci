@@ -1,0 +1,15 @@
+services:
+  backend:
+    environment:
+      BRAMKA_WEZLY_0_NR: "1"
+      BRAMKA_WEZLY_0_KOD: VISA
+      BRAMKA_WEZLY_0_URL: jdbc:oracle:thin:@//visa-db:1521/FREEPDB1
+      BRAMKA_WEZLY_1_NR: "2"
+      BRAMKA_WEZLY_1_KOD: MC
+      BRAMKA_WEZLY_1_URL: jdbc:oracle:thin:@//mastercard-db:1521/FREEPDB1
+      BRAMKA_WEZLY_2_NR: "3"
+      BRAMKA_WEZLY_2_KOD: AMEX
+      BRAMKA_WEZLY_2_URL: jdbc:oracle:thin:@//amex-db:1521/FREEPDB1
+      BRAMKA_WEZLY_3_NR: "4"
+      BRAMKA_WEZLY_3_KOD: DISC
+      BRAMKA_WEZLY_3_URL: jdbc:oracle:thin:@//discover-db:1521/FREEPDB1

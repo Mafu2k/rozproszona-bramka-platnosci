@@ -14,42 +14,229 @@ x-wezel: &wezel
   networks:
     - siec-wezlow
 
+x-wezel-env: &wezel-env
+  BRAMKA_PASSWORD: ${BRAMKA_PASSWORD:?brak BRAMKA_PASSWORD w .env}
+  LINK_PASSWORD: ${LINK_PASSWORD:?brak LINK_PASSWORD w .env}
+
+x-migracje: &migracje
+  image: flyway/flyway:13.12.2
+  restart: "no"
+  security_opt:
+    - no-new-privileges:true
+  networks:
+    - siec-wezlow
+  volumes:
+    - ./database:/flyway/projekt:ro
+  command: migrate
+
+x-migracje-env: &migracje-env
+  FLYWAY_USER: bramka
+  FLYWAY_PASSWORD: ${BRAMKA_PASSWORD:?brak BRAMKA_PASSWORD w .env}
+  FLYWAY_CONNECT_RETRIES: "20"
+  FLYWAY_PLACEHOLDERS_LINK_HASLO: ${LINK_PASSWORD:?brak LINK_PASSWORD w .env}
+  FLYWAY_PLACEHOLDERS_ADRES_VISA: //visa-db:1521/FREEPDB1
+  FLYWAY_PLACEHOLDERS_ADRES_MC: //mastercard-db:1521/FREEPDB1
+  FLYWAY_PLACEHOLDERS_ADRES_AMEX: //amex-db:1521/FREEPDB1
+
 services:
   visa-db:
     <<: *wezel
     container_name: visa-db
     environment:
+      <<: *wezel-env
       ORACLE_PASSWORD: ${VISA_ORACLE_PASSWORD:?brak VISA_ORACLE_PASSWORD w .env}
-      BRAMKA_PASSWORD: ${BRAMKA_PASSWORD:?brak BRAMKA_PASSWORD w .env}
     ports:
       - "127.0.0.1:1521:1521"
     volumes:
-      - ./docker/init:/container-entrypoint-initdb.d:ro
+      - ./database/init:/container-entrypoint-initdb.d:ro
       - visa-data:/opt/oracle/oradata
 
   mastercard-db:
     <<: *wezel
     container_name: mastercard-db
     environment:
+      <<: *wezel-env
       ORACLE_PASSWORD: ${MASTERCARD_ORACLE_PASSWORD:?brak MASTERCARD_ORACLE_PASSWORD w .env}
-      BRAMKA_PASSWORD: ${BRAMKA_PASSWORD:?brak BRAMKA_PASSWORD w .env}
     ports:
       - "127.0.0.1:1522:1521"
     volumes:
-      - ./docker/init:/container-entrypoint-initdb.d:ro
+      - ./database/init:/container-entrypoint-initdb.d:ro
       - mastercard-data:/opt/oracle/oradata
 
   amex-db:
     <<: *wezel
     container_name: amex-db
     environment:
+      <<: *wezel-env
       ORACLE_PASSWORD: ${AMEX_ORACLE_PASSWORD:?brak AMEX_ORACLE_PASSWORD w .env}
-      BRAMKA_PASSWORD: ${BRAMKA_PASSWORD:?brak BRAMKA_PASSWORD w .env}
     ports:
       - "127.0.0.1:1523:1521"
     volumes:
-      - ./docker/init:/container-entrypoint-initdb.d:ro
+      - ./database/init:/container-entrypoint-initdb.d:ro
       - amex-data:/opt/oracle/oradata
+
+  migracje-visa:
+    <<: *migracje
+    container_name: migracje-visa
+    environment:
+      <<: *migracje-env
+      FLYWAY_URL: jdbc:oracle:thin:@//visa-db:1521/FREEPDB1
+      FLYWAY_LOCATIONS: filesystem:/flyway/projekt/migrations/visa,filesystem:/flyway/projekt/migrations/fragmenty,filesystem:/flyway/projekt/seed/visa
+      FLYWAY_PLACEHOLDERS_NR_WEZLA: "1"
+    depends_on:
+      visa-db:
+        condition: service_healthy
+
+  migracje-mastercard:
+    <<: *migracje
+    container_name: migracje-mastercard
+    environment:
+      <<: *migracje-env
+      FLYWAY_URL: jdbc:oracle:thin:@//mastercard-db:1521/FREEPDB1
+      FLYWAY_LOCATIONS: filesystem:/flyway/projekt/migrations/repliki,filesystem:/flyway/projekt/migrations/fragmenty
+      FLYWAY_PLACEHOLDERS_NR_WEZLA: "2"
+    depends_on:
+      mastercard-db:
+        condition: service_healthy
+      migracje-visa:
+        condition: service_completed_successfully
+
+  migracje-amex:
+    <<: *migracje
+    container_name: migracje-amex
+    environment:
+      <<: *migracje-env
+      FLYWAY_URL: jdbc:oracle:thin:@//amex-db:1521/FREEPDB1
+      FLYWAY_LOCATIONS: filesystem:/flyway/projekt/migrations/repliki,filesystem:/flyway/projekt/migrations/fragmenty
+      FLYWAY_PLACEHOLDERS_NR_WEZLA: "3"
+    depends_on:
+      amex-db:
+        condition: service_healthy
+      migracje-visa:
+        condition: service_completed_successfully
+
+  migracje-visa-polaczenia:
+    <<: *migracje
+    container_name: migracje-visa-polaczenia
+    environment:
+      <<: *migracje-env
+      FLYWAY_URL: jdbc:oracle:thin:@//visa-db:1521/FREEPDB1
+      FLYWAY_LOCATIONS: filesystem:/flyway/projekt/migrations/visa-polaczenia
+      FLYWAY_TABLE: flyway_historia_polaczen
+      FLYWAY_BASELINE_ON_MIGRATE: "true"
+      FLYWAY_BASELINE_VERSION: "0"
+      FLYWAY_PLACEHOLDERS_NR_WEZLA: "1"
+    depends_on:
+      migracje-mastercard:
+        condition: service_completed_successfully
+      migracje-amex:
+        condition: service_completed_successfully
+
+  backend:
+    build: ./backend
+    container_name: backend
+    profiles: ["aplikacja"]
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      BRAMKA_PASSWORD: ${BRAMKA_PASSWORD:?brak BRAMKA_PASSWORD w .env}
+      KARTA_HMAC_KEY: ${KARTA_HMAC_KEY:?brak KARTA_HMAC_KEY w .env}
+      JWT_SECRET: ${JWT_SECRET:?brak JWT_SECRET w .env}
+      PANEL_ADMIN_PASSWORD: ${PANEL_ADMIN_PASSWORD:-}
+      PANEL_OPERATOR_PASSWORD: ${PANEL_OPERATOR_PASSWORD:-}
+      WEZEL_VISA_URL: jdbc:oracle:thin:@//visa-db:1521/FREEPDB1
+      WEZEL_MC_URL: jdbc:oracle:thin:@//mastercard-db:1521/FREEPDB1
+      WEZEL_AMEX_URL: jdbc:oracle:thin:@//amex-db:1521/FREEPDB1
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:3000,http://localhost:4200}
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:8583:8583"
+    networks:
+      - siec-wezlow
+    depends_on:
+      migracje-visa-polaczenia:
+        condition: service_completed_successfully
+
+  mock-api:
+    image: stoplight/prism:5.15.10
+    container_name: mock-api
+    profiles: ["mock"]
+    command: mock /api/openapi.yaml --host 0.0.0.0 --multiprocess=false
+    volumes:
+      - ./api:/api:ro
+    ports:
+      - "127.0.0.1:4010:4010"
+
+  prometheus:
+    image: prom/prometheus:v3.15.1
+    container_name: prometheus
+    profiles: ["monitoring"]
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=1d
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "127.0.0.1:9090:9090"
+    networks:
+      - siec-wezlow
+
+  grafana:
+    image: grafana/grafana:13.2.6
+    container_name: grafana
+    profiles: ["monitoring"]
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_AUTH_BASIC_ENABLED: "false"
+      GF_SECURITY_DISABLE_INITIAL_ADMIN_CREATION: "true"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/bramka.json
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "127.0.0.1:3001:3000"
+    networks:
+      - siec-wezlow
+    depends_on:
+      - prometheus
+
+  generator-ruchu:
+    build: ./backend
+    container_name: generator-ruchu
+    profiles: ["ruch"]
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+    entrypoint:
+      - java
+      - -XX:MaxRAMPercentage=50
+      - -Dloader.main=pl.janicki.bramka.demonstracja.GeneratorRuchu
+      - -cp
+      - aplikacja.jar
+      - org.springframework.boot.loader.launch.PropertiesLauncher
+    environment:
+      BRAMKA_URL: http://backend:8080
+      ISO8583_ADRES: backend:8583
+      PANEL_ADMIN_PASSWORD: ${PANEL_ADMIN_PASSWORD:?brak PANEL_ADMIN_PASSWORD w .env}
+      PANEL_OPERATOR_PASSWORD: ${PANEL_OPERATOR_PASSWORD:?brak PANEL_OPERATOR_PASSWORD w .env}
+      RUCH_TPS: ${RUCH_TPS:-20}
+      RUCH_UDZIAL_ISO: ${RUCH_UDZIAL_ISO:-0.2}
+    networks:
+      - siec-wezlow
 
 networks:
   siec-wezlow:
