@@ -1,0 +1,11 @@
+DROP PACKAGE IF EXISTS pkg_klienci;
+DROP VIEW IF EXISTS v_karta_globalna;
+DROP VIEW IF EXISTS v_transakcja_globalna;
+DROP SYNONYM IF EXISTS transakcja_amex;
+DROP SYNONYM IF EXISTS transakcja_mc;
+DROP SYNONYM IF EXISTS karta_amex;
+DROP SYNONYM IF EXISTS karta_mc;
+DROP DATABASE LINK IF EXISTS amex;
+DROP DATABASE LINK IF EXISTS mc;
+DELETE FROM "flyway_historia_polaczen" WHERE "version" = '1';
+COMMIT;
