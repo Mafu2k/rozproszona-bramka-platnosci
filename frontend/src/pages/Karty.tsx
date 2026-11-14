@@ -324,6 +324,7 @@ export function FormularzWydania({ klient: poczatkowy, onZamknij }: { klient?: K
       <Modal
         tytul="Karta wydana"
         onZamknij={onZamknij}
+        tylkoPrzyciskiem={Boolean(wydana.numerKarty)}
         stopka={
           <button type="button" className="przycisk przycisk-glowny" onClick={onZamknij}>
             Zapisałem numer, zamknij

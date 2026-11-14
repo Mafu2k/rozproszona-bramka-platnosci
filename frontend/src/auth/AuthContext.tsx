@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { useQueryClient } from '@tanstack/react-query';
 import { api, przyBrakuUwierzytelnienia, ustawToken } from '../api/client';
 import type { KodSieci, TokenLogowania, Uzytkownik } from '../api/types';
+import { zapiszKluczSymulatora } from '../lib/symulator';
 
 interface Sesja {
   token: string;
@@ -18,6 +19,7 @@ interface KontekstAuth {
   zaloguj: (login: string, haslo: string) => Promise<void>;
   wyloguj: () => Promise<void>;
   komunikatWylogowania: string | null;
+  wylogowanoRecznie: boolean;
 }
 
 const KLUCZ = 'bramka.sesja';
@@ -52,13 +54,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return s;
   });
   const [komunikatWylogowania, setKomunikat] = useState<string | null>(null);
+  const [wylogowanoRecznie, setWylogowanoRecznie] = useState(false);
 
   const zakoncz = useCallback(
-    (komunikat: string | null) => {
+    (komunikat: string | null, recznie = false) => {
       ustawToken(null);
       zapiszSesje(null);
+      zapiszKluczSymulatora(null);
       setSesja(null);
       setKomunikat(komunikat);
+      setWylogowanoRecznie(recznie);
       queryClient.clear();
     },
     [queryClient],
@@ -104,6 +109,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     ustawToken(nowa.token);
     zapiszSesje(nowa);
     setKomunikat(null);
+    setWylogowanoRecznie(false);
     setSesja(nowa);
   }, []);
 
@@ -113,7 +119,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       /* token i tak usuwamy lokalnie */
     }
-    zakoncz(null);
+    zakoncz(null, true);
   }, [zakoncz]);
 
   const wartosc = useMemo<KontekstAuth>(() => {
@@ -126,8 +132,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       zaloguj,
       wyloguj,
       komunikatWylogowania,
+      wylogowanoRecznie,
     };
-  }, [sesja, zaloguj, wyloguj, komunikatWylogowania]);
+  }, [sesja, zaloguj, wyloguj, komunikatWylogowania, wylogowanoRecznie]);
 
   return <Kontekst.Provider value={wartosc}>{children}</Kontekst.Provider>;
 }

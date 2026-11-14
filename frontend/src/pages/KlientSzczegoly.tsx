@@ -19,6 +19,7 @@ import {
   Szczegoly,
 } from '../components/ui';
 import { data, nazwaSieci } from '../lib/format';
+import { useStanWezlow } from '../lib/useStanWezlow';
 import { useZapis } from '../lib/useZapis';
 import { FormularzKlienta } from './Klienci';
 import { FormularzWydania, TabelaKart } from './Karty';
@@ -40,6 +41,12 @@ export function KlientSzczegoly() {
   const blokada = useZapis((klucz) =>
     api.zapis<WynikBlokadyGlobalnej>('POST', `/klienci/${id}/blokada-globalna`, klucz),
   );
+
+  const qWezly = useStanWezlow(czyAdmin);
+  const wezly = qWezly.data?.dane.wezly ?? [];
+  const visaNiedostepna = wezly.some((w) => w.rola === 'GLOWNY' && !w.dostepny);
+  const replika = wezly.find((w) => w.rola === 'REPLIKA' && w.dostepny)?.siec ?? 'REPLIKA';
+  const powodBlokady = visaNiedostepna ? 'Węzeł Visa niedostępny' : undefined;
 
   const klient = qKlient.data?.dane;
   const karty = qKarty.data?.dane;
@@ -87,12 +94,20 @@ export function KlientSzczegoly() {
             )}
             {czyAdmin && klient.status !== 'USUNIETY' && (
               <>
-                <button type="button" className="przycisk" onClick={() => setOkno('edycja')}>
+                <button
+                  type="button"
+                  className="przycisk"
+                  disabled={visaNiedostepna}
+                  title={powodBlokady}
+                  onClick={() => setOkno('edycja')}
+                >
                   Edytuj
                 </button>
                 <button
                   type="button"
                   className="przycisk przycisk-niebezpieczny"
+                  disabled={visaNiedostepna}
+                  title={powodBlokady}
                   onClick={() => {
                     blokada.wyczyscBlad();
                     setOkno('blokada');
@@ -103,6 +118,8 @@ export function KlientSzczegoly() {
                 <button
                   type="button"
                   className="przycisk przycisk-niebezpieczny-tekst"
+                  disabled={visaNiedostepna}
+                  title={powodBlokady}
                   onClick={() => {
                     usuniecie.wyczyscBlad();
                     setOkno('usun');
@@ -115,6 +132,8 @@ export function KlientSzczegoly() {
           </>
         }
       />
+
+      {visaNiedostepna && <BanerDanych dane={{ zrodlo: replika }} />}
 
       <section className="panel">
         <h2>Dane klienta</h2>

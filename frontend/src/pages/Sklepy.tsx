@@ -290,6 +290,7 @@ function KluczApi({ sklep, onZamknij }: { sklep: Sklep; onZamknij: () => void })
       <Modal
         tytul={`Klucz API: ${sklep.nazwa}`}
         onZamknij={onZamknij}
+        tylkoPrzyciskiem={Boolean(klucz.kluczApi)}
         stopka={
           <>
             {klucz.kluczApi && (
@@ -305,7 +306,7 @@ function KluczApi({ sklep, onZamknij }: { sklep: Sklep; onZamknij: () => void })
               </button>
             )}
             <button type="button" className="przycisk przycisk-glowny" onClick={onZamknij}>
-              Zamknij
+              Zapisałem klucz, zamknij
             </button>
           </>
         }

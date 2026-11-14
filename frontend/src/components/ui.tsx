@@ -112,27 +112,32 @@ export function Modal({
   children,
   stopka,
   szeroki,
+  tylkoPrzyciskiem,
 }: {
   tytul: string;
   onZamknij: () => void;
   children: ReactNode;
   stopka?: ReactNode;
   szeroki?: boolean;
+  tylkoPrzyciskiem?: boolean;
 }) {
   useEffect(() => {
+    if (tylkoPrzyciskiem) return;
     const esc = (e: KeyboardEvent) => e.key === 'Escape' && onZamknij();
     window.addEventListener('keydown', esc);
     return () => window.removeEventListener('keydown', esc);
-  }, [onZamknij]);
+  }, [onZamknij, tylkoPrzyciskiem]);
 
   return (
-    <div className="modal-tlo" onMouseDown={(e) => e.target === e.currentTarget && onZamknij()}>
+    <div className="modal-tlo" onMouseDown={(e) => !tylkoPrzyciskiem && e.target === e.currentTarget && onZamknij()}>
       <div className={`modal${szeroki ? ' modal-szeroki' : ''}`} role="dialog" aria-modal="true" aria-label={tytul}>
         <header className="modal-naglowek">
           <h2>{tytul}</h2>
-          <button type="button" className="przycisk-ikona" onClick={onZamknij} aria-label="Zamknij okno">
-            <X aria-hidden />
-          </button>
+          {!tylkoPrzyciskiem && (
+            <button type="button" className="przycisk-ikona" onClick={onZamknij} aria-label="Zamknij okno">
+              <X aria-hidden />
+            </button>
+          )}
         </header>
         <div className="modal-tresc">{children}</div>
         {stopka && <footer className="modal-stopka">{stopka}</footer>}
@@ -165,6 +170,7 @@ export function Potwierdzenie({
     <Modal
       tytul={tytul}
       onZamknij={onNie}
+      tylkoPrzyciskiem={trwa}
       stopka={
         <>
           <button type="button" className="przycisk" onClick={onNie} disabled={trwa}>

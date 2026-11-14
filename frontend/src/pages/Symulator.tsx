@@ -4,7 +4,7 @@ import { api } from '../api/client';
 import type { WynikPlatnosci } from '../api/types';
 import { BladApi, NaglowekStrony, Pole, Siec, Status, Szczegoly } from '../components/ui';
 import { jakoApiError, opisBledu } from '../lib/bledy';
-import { data, kwota, naGrosze } from '../lib/format';
+import { data, groszeNaTekst, kwota, naGrosze } from '../lib/format';
 import { wczytajKluczSymulatora, zapiszKluczSymulatora } from '../lib/symulator';
 
 /** Publiczne numery testowe z README backendu (karty demo wydawane przy pierwszym starcie). */
@@ -18,13 +18,20 @@ const KARTY_TESTOWE = [
   { numer: '371449635398431', siec: 'AMEX' },
 ];
 
+interface DoZwrotu {
+  rrn: string;
+  kwota: number;
+  waluta: string;
+  numer: number;
+}
+
 const noweIdZadania = (prefiks: string) => `${prefiks}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 
 export function Symulator() {
   const zapamietany = wczytajKluczSymulatora();
   const [kluczApi, setKluczApi] = useState(zapamietany?.kluczApi ?? '');
   const [historia, setHistoria] = useState<WynikPlatnosci[]>([]);
-  const [rrnDoZwrotu, setRrnDoZwrotu] = useState<{ rrn: string; kwota: number } | null>(null);
+  const [rrnDoZwrotu, setRrnDoZwrotu] = useState<DoZwrotu | null>(null);
 
   function zapiszKlucz(v: string) {
     setKluczApi(v);
@@ -32,6 +39,10 @@ export function Symulator() {
   }
 
   const dodaj = (w: WynikPlatnosci) => setHistoria((h) => [w, ...h].slice(0, 20));
+  const zwroconoZ = (rrn: string) =>
+    historia
+      .filter((z) => z.typ === 'ZWROT' && z.decyzja === 'ZATWIERDZONA' && z.rrnPierwotnej === rrn)
+      .reduce((suma, z) => suma + z.kwota, 0);
 
   return (
     <>
@@ -60,7 +71,7 @@ export function Symulator() {
 
       <div className="siatka-symulatora">
         <Autoryzacja kluczApi={kluczApi} onWynik={dodaj} />
-        <Zwrot kluczApi={kluczApi} onWynik={dodaj} wstepny={rrnDoZwrotu} key={rrnDoZwrotu?.rrn ?? 'zwrot'} />
+        <Zwrot kluczApi={kluczApi} onWynik={dodaj} wstepny={rrnDoZwrotu} key={rrnDoZwrotu?.numer ?? 'zwrot'} />
       </div>
 
       {historia.length > 0 && (
@@ -104,11 +115,13 @@ export function Symulator() {
                     </td>
                     <td className="liczba">{kwota(w.kwota, w.waluta)}</td>
                     <td className="akcje-wiersza">
-                      {w.typ === 'AUTORYZACJA' && w.decyzja === 'ZATWIERDZONA' && w.rrn && (
+                      {w.typ === 'AUTORYZACJA' && w.decyzja === 'ZATWIERDZONA' && w.rrn && zwroconoZ(w.rrn) < w.kwota && (
                         <button
                           type="button"
                           className="przycisk przycisk-maly"
-                          onClick={() => setRrnDoZwrotu({ rrn: w.rrn!, kwota: w.kwota })}
+                          onClick={() =>
+                            setRrnDoZwrotu({ rrn: w.rrn!, kwota: w.kwota - zwroconoZ(w.rrn!), waluta: w.waluta, numer: Date.now() })
+                          }
                         >
                           <ArrowCounterClockwise aria-hidden /> Zwrot
                         </button>
@@ -241,10 +254,11 @@ function Zwrot({
 }: {
   kluczApi: string;
   onWynik: (w: WynikPlatnosci) => void;
-  wstepny: { rrn: string; kwota: number } | null;
+  wstepny: DoZwrotu | null;
 }) {
   const [rrn, setRrn] = useState(wstepny?.rrn ?? '');
-  const [kwotaTekst, setKwota] = useState(wstepny ? (wstepny.kwota / 100).toFixed(2).replace('.', ',') : '');
+  const [kwotaTekst, setKwota] = useState(wstepny ? groszeNaTekst(wstepny.kwota) : '');
+  const [waluta, setWaluta] = useState(wstepny?.waluta ?? 'PLN');
   const [idZadania, setIdZadania] = useState(() => noweIdZadania('zwrot'));
   const [wynik, setWynik] = useState<WynikPlatnosci | null>(null);
   const [blad, setBlad] = useState<unknown>(null);
@@ -262,7 +276,7 @@ function Zwrot({
         idZadania,
         rrnPierwotnej: rrn,
         kwota: grosze,
-        waluta: 'PLN',
+        waluta,
       });
       setWynik(dane);
       onWynik(dane);
@@ -281,9 +295,14 @@ function Zwrot({
         <Pole etykieta="RRN transakcji pierwotnej" podpowiedz="12 cyfr. Kliknij „Zwrot” przy wyniku poniżej, aby uzupełnić.">
           <input value={rrn} onChange={(e) => setRrn(e.target.value)} pattern="[0-9]{12}" inputMode="numeric" required />
         </Pole>
-        <Pole etykieta="Kwota zwrotu (PLN)" podpowiedz="Całość albo część. Suma zwrotów nie może przekroczyć autoryzacji.">
-          <input value={kwotaTekst} onChange={(e) => setKwota(e.target.value)} inputMode="decimal" required />
-        </Pole>
+        <div className="siatka-2">
+          <Pole etykieta="Kwota zwrotu" podpowiedz="Całość albo część. Suma zwrotów nie może przekroczyć autoryzacji.">
+            <input value={kwotaTekst} onChange={(e) => setKwota(e.target.value)} inputMode="decimal" required />
+          </Pole>
+          <Pole etykieta="Waluta" podpowiedz="Taka jak w autoryzacji">
+            <input value={waluta} onChange={(e) => setWaluta(e.target.value.toUpperCase())} pattern="[A-Z]{3}" maxLength={3} />
+          </Pole>
+        </div>
         <Pole etykieta="ID żądania (idZadania)">
           <input value={idZadania} onChange={(e) => setIdZadania(e.target.value)} required spellCheck={false} />
         </Pole>
@@ -364,6 +383,10 @@ function TestObciazenia({ kluczApi }: { kluczApi: string }) {
       <p className="wyciszony maly">
         Wysyła N równoległych autoryzacji po 1,00 PLN i mierzy czas (wymaganie NFR2: 100 równoległych autoryzacji bez
         błędów, średnio poniżej 1 s). Każda autoryzacja obciąża kartę, więc używaj kart demo.
+      </p>
+      <p className="wyciszony maly">
+        Przeglądarka wysyła do jednego serwera najwyżej 6 żądań naraz, więc przy 100 zapytaniach reszta czeka w kolejce
+        i czasy są wyższe niż w samej bramce. Pomiar NFR2 bez tego narzutu jest w <code>docs/wyniki-testow.md</code>.
       </p>
       <div className="filtry">
         <div className="segment" role="group" aria-label="Liczba zapytań">

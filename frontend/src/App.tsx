@@ -15,9 +15,12 @@ import { Transakcje } from './pages/Transakcje';
 
 /** Trasy tylko dla zalogowanych. Uprawnienia i tak sprawdza backend; tu tylko nie pokazujemy ekranów bez dostępu. */
 function Chroniona({ children, tylkoAdmin }: { children: ReactNode; tylkoAdmin?: boolean }) {
-  const { uzytkownik, czyAdmin } = useAuth();
+  const { uzytkownik, czyAdmin, wylogowanoRecznie } = useAuth();
   const location = useLocation();
-  if (!uzytkownik) return <Navigate to="/logowanie" replace state={{ z: location.pathname + location.search }} />;
+  if (!uzytkownik) {
+    const powrot = wylogowanoRecznie ? undefined : { z: location.pathname + location.search };
+    return <Navigate to="/logowanie" replace state={powrot} />;
+  }
   if (tylkoAdmin && !czyAdmin) {
     return <Pusto>Ten ekran jest dostępny tylko dla administratora bramki.</Pusto>;
   }
