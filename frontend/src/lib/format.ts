@@ -26,6 +26,13 @@ export function naGrosze(tekst: string): number | null {
   return Math.round(Number(t) * 100);
 }
 
+const formatProcentu = new Intl.NumberFormat('pl-PL', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+
+/** Wartość w procentach, np. 44.7 -> "44,7%". */
+export function procent(wartosc: number): string {
+  return `${formatProcentu.format(wartosc)}%`;
+}
+
 export function groszeNaTekst(grosze: number): string {
   return (grosze / 100).toFixed(2).replace('.', ',');
 }

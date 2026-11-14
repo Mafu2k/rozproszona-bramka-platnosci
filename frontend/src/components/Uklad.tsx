@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
 import {
   ChartBar,
   ChartPieSlice,
@@ -16,9 +15,8 @@ import {
   type Icon,
 } from '@phosphor-icons/react';
 import { useAuth } from '../auth/AuthContext';
-import { api } from '../api/client';
-import type { StanWezlow } from '../api/types';
 import { nazwaSieci } from '../lib/format';
+import { useStanWezlow } from '../lib/useStanWezlow';
 
 interface Pozycja {
   do: string;
@@ -70,11 +68,7 @@ export function Logo({ podpis }: { podpis: string }) {
 
 /** Wskaźnik dostępności węzłów w nagłówku (tylko administrator ma dostęp do /wezly/stan). */
 function WskaznikWezlow() {
-  const q = useQuery({
-    queryKey: ['wezly'],
-    queryFn: () => api.get<StanWezlow>('/wezly/stan'),
-    refetchInterval: 5000,
-  });
+  const q = useStanWezlow();
   const wezly = q.data?.dane.wezly ?? [];
   if (q.isError) return <span className="wskaznik wyciszony">stan węzłów: brak danych</span>;
   return (
@@ -91,14 +85,15 @@ function WskaznikWezlow() {
 
 export function Uklad() {
   const { uzytkownik, czyAdmin, siec, wyloguj } = useAuth();
-  const [menuOtwarte, setMenuOtwarte] = useState(false);
   const location = useLocation();
+  const [menuOtwarteNa, setMenuOtwarteNa] = useState<string | null>(null);
+  const menuOtwarte = menuOtwarteNa === location.pathname;
+  const setMenuOtwarte = (otwarte: boolean) => setMenuOtwarteNa(otwarte ? location.pathname : null);
   const tresc = useRef<HTMLElement>(null);
   const pierwszy = useRef(true);
 
   // Po zmianie strony zamykamy menu mobilne i przenosimy fokus na treść (czytniki ekranu).
   useEffect(() => {
-    setMenuOtwarte(false);
     if (pierwszy.current) {
       pierwszy.current = false;
       return;
@@ -138,7 +133,11 @@ export function Uklad() {
               {czyAdmin ? 'Administrator bramki' : `Operator sieci ${nazwaSieci(siec)}`}
             </span>
           </div>
-          <button type="button" className="przycisk przycisk-pelny" onClick={() => void wyloguj()}>
+          <button
+            type="button"
+            className="przycisk przycisk-pelny"
+            onClick={() => void wyloguj()}
+          >
             <SignOut aria-hidden /> Wyloguj
           </button>
         </div>
@@ -153,7 +152,7 @@ export function Uklad() {
             aria-label={menuOtwarte ? 'Zamknij menu' : 'Otwórz menu'}
             aria-expanded={menuOtwarte}
             aria-controls="menu-boczne"
-            onClick={() => setMenuOtwarte((o) => !o)}
+            onClick={() => setMenuOtwarte(!menuOtwarte)}
           >
             {menuOtwarte ? <X aria-hidden size={22} /> : <List aria-hidden size={22} />}
           </button>

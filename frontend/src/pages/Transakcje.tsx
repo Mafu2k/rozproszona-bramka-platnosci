@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { CaretDown, CaretUp, FunnelSimple, X } from '@phosphor-icons/react';
@@ -38,10 +38,11 @@ export function Transakcje() {
 
   const [roboczy, setRoboczy] = useState(filtr);
   const adres = params.toString();
-  useEffect(() => {
-    setRoboczy(Object.fromEntries(POLA_FILTRA.map((p) => [p, params.get(p) ?? ''])) as Record<PoleFiltra, string>);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adres]);
+  const [adresRoboczego, setAdresRoboczego] = useState(adres);
+  if (adres !== adresRoboczego) {
+    setAdresRoboczego(adres);
+    setRoboczy(filtr);
+  }
 
   const zapytanie = {
     siec: filtr.siec,
@@ -227,8 +228,7 @@ export function Transakcje() {
                     </td>
                     <td>#{t.idSklepu}</td>
                     <td>
-                      <Status wartosc={t.typ === 'ZWROT' ? 'ZWROT' : null} />
-                      {t.typ === 'AUTORYZACJA' && <span className="wyciszony">autoryzacja</span>}
+                      {t.typ === 'ZWROT' ? <Status wartosc="ZWROT" /> : <span className="wyciszony">autoryzacja</span>}
                     </td>
                     <td className="liczba">{kwota(t.kwota, t.waluta)}</td>
                     <td>

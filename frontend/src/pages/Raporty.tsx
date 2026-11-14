@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ChartBar } from '@phosphor-icons/react';
@@ -7,7 +7,7 @@ import { SIECI, type KodSieci, type RaportObrotow, type Sklep, type StatystykiSi
 import { BanerDanych, BladApi, CzasOdpowiedzi, Ladowanie, NaglowekStrony, Pole, Siec } from '../components/ui';
 import { WyborSklepu } from '../components/Wybor';
 import { WykresSlupkowy } from '../components/Wykres';
-import { dzien, dzisiaj, koniecDnia, kwota, poczatekDnia } from '../lib/format';
+import { dzien, dzisiaj, koniecDnia, kwota, poczatekDnia, procent } from '../lib/format';
 
 function Okres({
   od,
@@ -50,7 +50,7 @@ function BrakSieci({ siec }: { siec: KodSieci }) {
 export function RaportObrotowSklepu() {
   const [params, setParams] = useSearchParams();
   const idZAdresu = Number(params.get('idSklepu')) || null;
-  const [sklep, setSklep] = useState<Sklep | null>(null);
+  const [wybranySklep, setSklep] = useState<Sklep | null | undefined>(undefined);
   const [od, setOd] = useState(params.get('od') ?? dzisiaj(-30));
   const [doo, setDo] = useState(params.get('do') ?? dzisiaj());
 
@@ -58,11 +58,9 @@ export function RaportObrotowSklepu() {
   const qSklep = useQuery({
     queryKey: ['sklepy', 'szczegoly', idZAdresu],
     queryFn: () => api.get<Sklep>(`/sklepy/${idZAdresu}`),
-    enabled: idZAdresu !== null && sklep === null,
+    enabled: idZAdresu !== null && wybranySklep === undefined,
   });
-  useEffect(() => {
-    if (qSklep.data && !sklep) setSklep(qSklep.data.dane);
-  }, [qSklep.data, sklep]);
+  const sklep = wybranySklep === undefined ? (qSklep.data?.dane ?? null) : wybranySklep;
 
   const wykonany = params.get('idSklepu') && params.get('od') && params.get('do');
   const zapytanie = wykonany
@@ -253,7 +251,7 @@ export function StatystykiSieciStrona() {
               <span className="kafelek-wartosc">
                 {razem.odrzucone.toLocaleString('pl-PL')}{' '}
                 <span className="kafelek-dodatek">
-                  ({razem.liczba > 0 ? ((razem.odrzucone / razem.liczba) * 100).toFixed(1) : '0.0'}%)
+                  ({procent(razem.liczba > 0 ? (razem.odrzucone / razem.liczba) * 100 : 0)})
                 </span>
               </span>
             </div>
@@ -294,7 +292,7 @@ export function StatystykiSieciStrona() {
                         <td className="liczba">{w.liczbaTransakcji.toLocaleString('pl-PL')}</td>
                         <td className="liczba">{kwota(w.sumaKwot)}</td>
                         <td className="liczba">{w.liczbaOdrzuconych.toLocaleString('pl-PL')}</td>
-                        <td className="liczba">{w.odsetekOdrzuconych.toFixed(1)}%</td>
+                        <td className="liczba">{procent(w.odsetekOdrzuconych)}</td>
                       </tr>
                     );
                   })}
@@ -326,7 +324,7 @@ export function StatystykiSieciStrona() {
                 slupki={s.sieci.map((w) => ({
                   siec: w.siec,
                   wartosc: w.odsetekOdrzuconych,
-                  tekst: `${w.odsetekOdrzuconych.toFixed(1)}%`,
+                  tekst: procent(w.odsetekOdrzuconych),
                 }))}
               />
             </section>
