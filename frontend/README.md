@@ -20,7 +20,7 @@ Front zawsze woła `/api/v1/...`, a Vite przekazuje żądania do backendu (`:808
 
 Na mocku można zalogować się dowolnym loginem i hasłem. Na backendzie używasz kont `admin`, `operator.visa`, `operator.mastercard`, `operator.amex` z hasłami z `.env`.
 
-Build produkcyjny: `npm run build` (wynik w `dist/`).
+Lint: `npm run lint`. Build produkcyjny: `npm run build` (wynik w `dist/`).
 
 ## Ekrany
 
@@ -58,4 +58,4 @@ Build produkcyjny: `npm run build` (wynik w `dist/`).
 
 ## Wygląd
 
-System wizualny dobrany wtyczką ui-ux-pro-max: styl Swiss Minimalism, paleta „Banking / Traditional Finance” (granat i stonowane złoto) z ciemnym motywem, fonty IBM Plex Sans / Mono (lokalnie, bez internetu), ikony Phosphor, gęsty układ dashboardu. Kolory są tokenami w `src/styles.css`. Jest widoczny fokus, `prefers-reduced-motion`, boczne menu jako szuflada poniżej 1024 px i cele dotyku 44 px na telefonie.
+Styl Swiss Minimalism, paleta „Banking / Traditional Finance” (granat i stonowane złoto) z ciemnym motywem, fonty IBM Plex Sans / Mono (lokalnie, bez internetu), ikony Phosphor, gęsty układ dashboardu. Kolory są tokenami w `src/styles.css`. Jest widoczny fokus, `prefers-reduced-motion`, boczne menu jako szuflada poniżej 1024 px i cele dotyku 44 px na telefonie.

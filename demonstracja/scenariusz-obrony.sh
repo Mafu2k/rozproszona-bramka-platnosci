@@ -52,7 +52,7 @@ pauza() {
   fi
 }
 
-uuid() { cat /proc/sys/kernel/random/uuid; }
+uuid() { python3 -c 'import uuid; print(uuid.uuid4())'; }
 teraz() { date +%s; }
 
 pole() {

@@ -271,7 +271,7 @@ Grafana pokazuje pulpit bramki bez logowania (tylko odczyt). Pełny ekran: `http
 
 Generator ruchu zakłada przez API 3 sklepy i 21 kart i płaci nimi ok. 20 razy na sekundę (20% przez ISO 8583). Część kart ma niski limit, jest zablokowana albo w EUR, więc pojawiają się odmowy 51, 62, 57 i 14. Tempo ustawiają `RUCH_TPS` i `RUCH_UDZIAL_ISO` w `.env`. Zatrzymanie: `docker compose stop generator-ruchu`.
 
-Scenariusz obrony, z katalogu projektu w Ubuntu (WSL) albo Git Bash:
+Scenariusz obrony, z katalogu projektu w Ubuntu (WSL), Linuksie albo macOS (wymaga `python3`; Git Bash nie jest obsługiwany):
 
 ```bash
 ./demonstracja/scenariusz-obrony.sh
