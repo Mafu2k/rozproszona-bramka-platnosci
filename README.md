@@ -77,7 +77,7 @@ Logowanie: `admin` z hasłem `PANEL_ADMIN_PASSWORD` z pliku `.env`.
 |---|---|---|
 | Git | pobranie projektu | `git --version` |
 | Docker Desktop **albo** Docker w WSL2 | węzły Oracle, migracje, backend | `docker compose version` |
-| Node.js 20+ | panel webowy | `node -v` |
+| Node.js 20.19+ | panel webowy | `node -v` |
 | ok. 8 GB wolnego RAM | trzy instancje Oracle naraz | — |
 
 **Windows: Docker Desktop (najprościej).** Zainstaluj ze strony docker.com i uruchom. Ikonka wieloryba w zasobniku musi być zielona, zanim wpiszesz jakąkolwiek komendę `docker`.

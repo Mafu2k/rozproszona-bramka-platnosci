@@ -4,7 +4,7 @@ React 18 + TypeScript + Vite. Panel korzysta z REST API backendu opisanego w [`.
 
 ## Uruchomienie
 
-Wymagany Node.js 20+.
+Wymagany Node.js 20.19+.
 
 ```bash
 cd frontend
