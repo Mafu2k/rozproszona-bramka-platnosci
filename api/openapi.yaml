@@ -1,0 +1,1982 @@
+openapi: 3.0.3
+info:
+  title: Bramka płatności API
+  version: 1.0.0
+  description: |
+    API rozproszonej bramki płatności kartowych (węzły Visa, MasterCard, American Express).
+
+    Konwencje:
+    - kwoty są liczbami całkowitymi w groszach (`12999` = 129,99 PLN),
+    - daty i czasy w ISO 8601 w UTC (`2026-11-13T12:30:00.000Z`), data ważności karty jako `RRRR-MM`,
+    - decyzja płatnicza to wynik (HTTP 200 z `decyzja: ODRZUCONA`), a nie błąd HTTP,
+    - błędy mają jeden format: `{ kod, komunikat, szczegoly }`,
+    - każde żądanie zapisu z panelu wymaga nagłówka `Idempotency-Key`; powtórzenie z tym samym kluczem
+      i tymi samymi danymi zwraca zapisaną odpowiedź, z innymi danymi - 409 z kodem `94`,
+    - pełny numer karty jest przyjmowany tylko w autoryzacji i zwracany tylko raz, przy wydaniu karty;
+      w pozostałych odpowiedziach występuje wyłącznie maska (6 pierwszych i 4 ostatnie cyfry).
+servers:
+  - url: http://localhost:8080/api/v1
+    description: Lokalny backend
+  - url: http://localhost:4010
+    description: Mock (Prism) zbudowany z tego pliku
+tags:
+  - name: Płatności
+    description: FR2, FR3 - API dla sklepów, uwierzytelnienie kluczem API
+  - name: Uwierzytelnianie
+    description: FR1 - logowanie do panelu
+  - name: Klienci
+    description: FR4, FR7
+  - name: Sklepy
+    description: FR5
+  - name: Karty
+    description: FR6
+  - name: Transakcje
+    description: FR8
+  - name: Raporty
+    description: FR9, FR10
+  - name: Monitoring
+    description: FR11
+security:
+  - tokenPanelu: []
+
+paths:
+  /platnosci/autoryzacje:
+    post:
+      tags: [Płatności]
+      summary: Autoryzacja płatności kartą (FR2)
+      description: |
+        Bramka sprawdza długość i sumę Luhna numeru, rozpoznaje sieć po BIN i kieruje żądanie do węzła sieci.
+        Ponowienie z tym samym `idZadania` i tymi samymi danymi zwraca zapisaną decyzję i ten sam RRN.
+      operationId: autoryzuj
+      security:
+        - kluczApiSklepu: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ZadanieAutoryzacji'
+            example:
+              idZadania: zam-2026-000123
+              numerKarty: '5555555555554444'
+              kwota: 12999
+              waluta: PLN
+      responses:
+        '200':
+          description: Decyzja (zatwierdzona albo odrzucona)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WynikPlatnosci'
+              examples:
+                zatwierdzona:
+                  value:
+                    idZadania: zam-2026-000123
+                    decyzja: ZATWIERDZONA
+                    kod: '00'
+                    komunikat: Transakcja zatwierdzona
+                    rrn: '631720000001'
+                    typ: AUTORYZACJA
+                    kwota: 12999
+                    waluta: PLN
+                    siec: MC
+                    numerKarty: 555555******4444
+                    statusTransakcji: AUTORYZOWANA
+                    dataTransakcji: '2026-11-13T12:30:00.000Z'
+                    rrnPierwotnej: null
+                    powtorzona: false
+                odrzucona:
+                  value:
+                    idZadania: zam-2026-000124
+                    decyzja: ODRZUCONA
+                    kod: '51'
+                    komunikat: Brak wystarczających środków
+                    rrn: '631720000002'
+                    typ: AUTORYZACJA
+                    kwota: 500000
+                    waluta: PLN
+                    siec: MC
+                    numerKarty: 555555******4444
+                    statusTransakcji: ODRZUCONA
+                    dataTransakcji: '2026-11-13T12:31:00.000Z'
+                    rrnPierwotnej: null
+                    powtorzona: false
+        '400':
+          $ref: '#/components/responses/BladZadaniaPlatnosci'
+        '401':
+          $ref: '#/components/responses/BrakUwierzytelnienia'
+        '403':
+          $ref: '#/components/responses/BrakUprawnien'
+        '409':
+          $ref: '#/components/responses/KonfliktPlatnosci'
+        '503':
+          $ref: '#/components/responses/SiecNiedostepna'
+
+  /platnosci/zwroty:
+    post:
+      tags: [Płatności]
+      summary: Zwrot całości lub części transakcji (FR3)
+      description: |
+        Zwrot wskazuje transakcję pierwotną jej numerem RRN. Suma zwrotów nie może przekroczyć kwoty autoryzacji.
+        Po zwrocie całości transakcja pierwotna ma status `ZWROCONA`.
+      operationId: zwroc
+      security:
+        - kluczApiSklepu: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ZadanieZwrotu'
+            example:
+              idZadania: zwrot-2026-000045
+              rrnPierwotnej: '631720000001'
+              kwota: 2999
+              waluta: PLN
+      responses:
+        '200':
+          description: Decyzja zwrotu
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WynikPlatnosci'
+              example:
+                idZadania: zwrot-2026-000045
+                decyzja: ZATWIERDZONA
+                kod: '00'
+                komunikat: Transakcja zatwierdzona
+                rrn: '631720000007'
+                typ: ZWROT
+                kwota: 2999
+                waluta: PLN
+                siec: MC
+                numerKarty: 555555******4444
+                statusTransakcji: AUTORYZOWANA
+                dataTransakcji: '2026-11-13T13:05:00.000Z'
+                rrnPierwotnej: '631720000001'
+                powtorzona: false
+        '400':
+          $ref: '#/components/responses/BladZadaniaPlatnosci'
+        '401':
+          $ref: '#/components/responses/BrakUwierzytelnienia'
+        '403':
+          $ref: '#/components/responses/BrakUprawnien'
+        '409':
+          $ref: '#/components/responses/KonfliktPlatnosci'
+        '503':
+          $ref: '#/components/responses/SiecNiedostepna'
+
+  /platnosci/{idZadania}:
+    get:
+      tags: [Płatności]
+      summary: Status żądania po identyfikatorze sklepu i idZadania
+      description: Służy sklepowi do sprawdzenia wyniku po przekroczeniu czasu odpowiedzi.
+      operationId: statusZadania
+      security:
+        - kluczApiSklepu: []
+      parameters:
+        - name: idZadania
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/IdZadania'
+      responses:
+        '200':
+          description: Zapisany wynik
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WynikPlatnosci'
+        '401':
+          $ref: '#/components/responses/BrakUwierzytelnienia'
+        '404':
+          $ref: '#/components/responses/NieZnaleziono'
+        '503':
+          $ref: '#/components/responses/SiecNiedostepna'
+
+  /auth/logowanie:
+    post:
+      tags: [Uwierzytelnianie]
+      summary: Logowanie do panelu (FR1)
+      operationId: zaloguj
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Logowanie'
+            example:
+              login: operator.mastercard
+              haslo: tajne-haslo
+      responses:
+        '200':
+          description: Token JWT
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenLogowania'
+              example:
+                token: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJvcGVyYXRvci5tYXN0ZXJjYXJkIn0.sygnatura
+                typ: Bearer
+                wygasa: '2026-11-13T13:00:00.000Z'
+                uzytkownik:
+                  id: 3
+                  login: operator.mastercard
+                  rola: OPERATOR
+                  siec: MC
+        '400':
+          $ref: '#/components/responses/BladWalidacji'
+        '401':
+          $ref: '#/components/responses/BrakUwierzytelnienia'
+        '429':
+          $ref: '#/components/responses/ZbytWieleProb'
+        '503':
+          $ref: '#/components/responses/SiecNiedostepna'
+
+  /auth/wylogowanie:
+    post:
+      tags: [Uwierzytelnianie]
+      summary: Wylogowanie (unieważnia token)
+      operationId: wyloguj
+      responses:
+        '204':
+          description: Wylogowano
+        '401':
+          $ref: '#/components/responses/BrakUwierzytelnienia'
+
+  /auth/ja:
+    get:
+      tags: [Uwierzytelnianie]
+      summary: Bieżący użytkownik z rolą i siecią
+      operationId: biezacyUzytkownik
+      responses:
+        '200':
+          description: Użytkownik
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Uzytkownik'
+              example:
+                id: 1
+                login: admin
+                rola: ADMIN
+                siec: null
+        '401':
+          $ref: '#/components/responses/BrakUwierzytelnienia'
+
+  /klienci:
+    get:
+      tags: [Klienci]
+      summary: Lista klientów z filtrami (FR4)
+      description: Czytana z węzła Visa, a przy jego niedostępności z repliki (pole `zrodlo`).
+      operationId: listaKlientow
+      parameters:
+        - name: szukaj
+          in: query
+          description: Fragment imienia, nazwiska albo adresu e-mail
+          schema:
+            type: string
+            maxLength: 100
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/StatusKlienta'
+        - $ref: '#/components/parameters/Strona'
+        - $ref: '#/components/parameters/Rozmiar'
+      responses:
+        '200':
+          description: Strona klientów
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StronaKlientow'
+              example:
+                elementy:
+                  - id: 1
+                    imie: Anna
+                    nazwisko: Kowalska
+                    email: anna.kowalska@example.com
+                    telefon: '+48501100200'
+                    kraj: PL
+                    dataRejestracji: '2026-11-13T10:00:00.000Z'
+                    status: AKTYWNY
+                strona: 0
+                rozmiar: 20
+                lacznie: 1
+                zrodlo: VISA
+                czesciowy: false
+                brakujaceSieci: []
+        '400':
+          $ref: '#/components/responses/BladWalidacji'
+        '401':
+          $ref: '#/components/responses/BrakUwierzytelnienia'
+        '503':
+          $ref: '#/components/responses/SiecNiedostepna'
+    post:
+      tags: [Klienci]
+      summary: Dodanie klienta (FR4, administrator)
+      operationId: dodajKlienta
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KlientDane'
+            example:
+              imie: Jan
+              nazwisko: Kowalski
+              email: jan.kowalski@example.com
+              telefon: '+48600700800'
+              kraj: PL
+      responses:
+        '201':
+          description: Utworzono
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Klient'
+        '400':
+          $ref: '#/components/responses/BladWalidacji'
+        '401':
+          $ref: '#/components/responses/BrakUwierzytelnienia'
+        '403':
+          $ref: '#/components/responses/BrakUprawnien'
+        '409':
+          $ref: '#/components/responses/Konflikt'
+        '503':
+          $ref: '#/components/responses/SiecNiedostepna'
+
+  /klienci/{idKlienta}:
+    parameters:
+      - $ref: '#/components/parameters/IdKlienta'
+    get:
+      tags: [Klienci]
+      summary: Szczegóły klienta
+      operationId: klient
+      responses:
+        '200':
+          description: Klient
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Klient'
+        '401':
+          $ref: '#/components/responses/BrakUwierzytelnienia'
+        '404':
+          $ref: '#/components/responses/NieZnaleziono'
+        '503':
+          $ref: '#/components/responses/SiecNiedostepna'
+    put:
+      tags: [Klienci]
+      summary: Edycja klienta (FR4, administrator)
+      operationId: zmienKlienta
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KlientZmiana'
+      responses:
+        '200':
+          description: Zmieniono
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Klient'
+        '400':
+          $ref: '#/components/responses/BladWalidacji'
+        '401':
+          $ref: '#/components/responses/BrakUwierzytelnienia'
+        '403':
+          $ref: '#/components/responses/BrakUprawnien'
+        '404':
+          $ref: '#/components/responses/NieZnaleziono'
+        '409':
+          $ref: '#/components/responses/Konflikt'
+        '503':
+          $ref: '#/components/responses/SiecNiedostepna'
+    delete:
+      tags: [Klienci]
+      summary: Usunięcie logiczne klienta (FR4, administrator)
+      description: Możliwe tylko, gdy klient nie ma aktywnych kart w żadnej sieci. Wymaga dostępności wszystkich węzłów.
+      operationId: usunKlienta
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: Usunięto (status USUNIETY)
+        '401':
+          $ref: '#/components/responses/BrakUwierzytelnienia'
+        '403':
+          $ref: '#/components/responses/BrakUprawnien'
+        '404':
+          $ref: '#/components/responses/NieZnaleziono'
+        '409':
+          $ref: '#/components/responses/Konflikt'
+        '503':
+          $ref: '#/components/responses/SiecNiedostepna'
+
+  /klienci/{idKlienta}/karty:
+    parameters:
+      - $ref: '#/components/parameters/IdKlienta'
+    get:
+      tags: [Klienci]
+      summary: Karty klienta ze wszystkich sieci
+      description: Operator widzi tylko karty swojej sieci. Gdy węzeł jest niedostępny, lista jest częściowa.
+      operationId: kartyKlienta
+      responses:
+        '200':
+          description: Karty
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListaKart'
+        '401':
+          $ref: '#/components/responses/BrakUwierzytelnienia'
+        '404':
+          $ref: '#/components/responses/NieZnaleziono'
+
+  /klienci/{idKlienta}/blokada-globalna:
+    parameters:
+      - $ref: '#/components/parameters/IdKlienta'
+    post:
+      tags: [Klienci]
+      summary: Blokada klienta we wszystkich sieciach (FR7, administrator)
+      description: Jedna transakcja rozproszona z zatwierdzaniem dwufazowym (2PC). Przy niedostępnym węźle nic nie zostaje zmienione.
+      operationId: zablokujKlientaGlobalnie
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Zablokowano
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WynikBlokadyGlobalnej'
+              example:
+                idKlienta: 1
+                zablokowaneKarty:
+                  VISA: 1
+                  MC: 2
+                  AMEX: 0
+        '401':
+          $ref: '#/components/responses/BrakUwierzytelnienia'
+        '403':
+          $ref: '#/components/responses/BrakUprawnien'
+        '404':
+          $ref: '#/components/responses/NieZnaleziono'
+        '409':
+          $ref: '#/components/responses/Konflikt'
+        '503':
+          $ref: '#/components/responses/SiecNiedostepna'
+
+  /sklepy:
+    get:
+      tags: [Sklepy]
+      summary: Lista sklepów z filtrami (FR5)
+      operationId: listaSklepow
+      parameters:
+        - name: szukaj
+          in: query
+          description: Fragment nazwy albo NIP
+          schema:
+            type: string
+            maxLength: 100
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/StatusSklepu'
+        - $ref: '#/components/parameters/Strona'
+        - $ref: '#/components/parameters/Rozmiar'
+      responses:
+        '200':
+          description: Strona sklepów
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StronaSklepow'
+        '400':
+          $ref: '#/components/responses/BladWalidacji'
+        '401':
+          $ref: '#/components/responses/BrakUwierzytelnienia'
+        '503':
+          $ref: '#/components/responses/SiecNiedostepna'
+    post:
+      tags: [Sklepy]
+      summary: Dodanie sklepu (FR5, administrator)
+      operationId: dodajSklep
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SklepDane'
+            example:
+              nazwa: Sklep Testowy
+              nip: '5260181596'
+              kategoriaMcc: '5732'
+              url: https://sklep.example.com
+              emailKontaktowy: kontakt@sklep.example.com
+      responses:
+        '201':
+          description: Utworzono
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sklep'
+        '400':
+          $ref: '#/components/responses/BladWalidacji'
+        '401':
+          $ref: '#/components/responses/BrakUwierzytelnienia'
+        '403':
+          $ref: '#/components/responses/BrakUprawnien'
+        '409':
+          $ref: '#/components/responses/Konflikt'
+        '503':
+          $ref: '#/components/responses/SiecNiedostepna'
+
+  /sklepy/{idSklepu}:
+    parameters:
+      - $ref: '#/components/parameters/IdSklepu'
+    get:
+      tags: [Sklepy]
+      summary: Szczegóły sklepu
+      operationId: sklep
+      responses:
+        '200':
+          description: Sklep
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sklep'
+        '401':
+          $ref: '#/components/responses/BrakUwierzytelnienia'
+        '404':
+          $ref: '#/components/responses/NieZnaleziono'
+        '503':
+          $ref: '#/components/responses/SiecNiedostepna'
+    put:
+      tags: [Sklepy]
+      summary: Edycja sklepu (FR5, administrator)
+      operationId: zmienSklep
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SklepZmiana'
+      responses:
+        '200':
+          description: Zmieniono
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sklep'
+        '400':
+          $ref: '#/components/responses/BladWalidacji'
+        '401':
+          $ref: '#/components/responses/BrakUwierzytelnienia'
+        '403':
+          $ref: '#/components/responses/BrakUprawnien'
+        '404':
+          $ref: '#/components/responses/NieZnaleziono'
+        '409':
+          $ref: '#/components/responses/Konflikt'
+        '503':
+          $ref: '#/components/responses/SiecNiedostepna'
+    delete:
+      tags: [Sklepy]
+      summary: Usunięcie logiczne sklepu (FR5, administrator)
+      description: Ustawia status USUNIETY i unieważnia klucz API.
+      operationId: usunSklep
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: Usunięto
+        '401':
+          $ref: '#/components/responses/BrakUwierzytelnienia'
+        '403':
+          $ref: '#/components/responses/BrakUprawnien'
+        '404':
+          $ref: '#/components/responses/NieZnaleziono'
+        '503':
+          $ref: '#/components/responses/SiecNiedostepna'
+
+  /sklepy/{idSklepu}/klucz-api:
+    parameters:
+      - $ref: '#/components/parameters/IdSklepu'
+    post:
+      tags: [Sklepy]
+      summary: Wygenerowanie nowego klucza API sklepu (administrator)
+      description: |
+        Klucz jest zwracany tylko w tej odpowiedzi; baza przechowuje wyłącznie jego skrót SHA-256.
+        Poprzedni klucz przestaje działać. Powtórzenie z tym samym `Idempotency-Key` zwraca `kluczApi: null`.
+      operationId: wygenerujKluczApi
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201':
+          description: Wygenerowano
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NowyKluczApi'
+              example:
+                idSklepu: 1
+                kluczApi: bp_8Jw3kQm0vYx2Lr9TfN5cZa7HdE1sGu4pBi6oKy0qVn
+        '401':
+          $ref: '#/components/responses/BrakUwierzytelnienia'
+        '403':
+          $ref: '#/components/responses/BrakUprawnien'
+        '404':
+          $ref: '#/components/responses/NieZnaleziono'
+        '409':
+          $ref: '#/components/responses/Konflikt'
+        '503':
+          $ref: '#/components/responses/SiecNiedostepna'
+
+  /karty:
+    get:
+      tags: [Karty]
+      summary: Lista kart (FR6)
+      description: Operator widzi tylko karty swojej sieci. Administrator bez filtra `siec` dostaje karty ze wszystkich węzłów.
+      operationId: listaKart
+      parameters:
+        - name: siec
+          in: query
+          schema:
+            $ref: '#/components/schemas/KodSieci'
+        - name: idKlienta
+          in: query
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/StatusKarty'
+        - $ref: '#/components/parameters/Strona'
+        - $ref: '#/components/parameters/Rozmiar'
+      responses:
+        '200':
+          description: Strona kart
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StronaKart'
+        '400':
+          $ref: '#/components/responses/BladWalidacji'
+        '401':
+          $ref: '#/components/responses/BrakUwierzytelnienia'
+        '403':
+          $ref: '#/components/responses/BrakUprawnien'
+        '503':
+          $ref: '#/components/responses/SiecNiedostepna'
+    post:
+      tags: [Karty]
+      summary: Wydanie karty klientowi (FR6, operator)
+      description: |
+        Karta powstaje w sieci operatora. Bramka generuje numer jak system wydawcy: 8-cyfrowy BIN wydawcy sieci,
+        numer rachunku i cyfra kontrolna Luhna.
+        Pełny numer jest zwracany tylko w tej odpowiedzi; baza przechowuje maskę i token HMAC.
+        Wymaga dostępności węzła Visa (blokada wiersza klienta w kopii głównej).
+      operationId: wydajKarte
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KartaNowa'
+            example:
+              idKlienta: 1
+              limitKredytowy: 500000
+              waluta: PLN
+              miesiaceWaznosci: 36
+      responses:
+        '201':
+          description: Wydano
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KartaWydana'
+              example:
+                numerKarty: '5399910012345672'
+                karta:
+                  id: 12
+                  idKlienta: 1
+                  siec: MC
+                  numerKarty: 539991******5672
+                  dataWaznosci: 2029-11
+                  limitKredytowy: 500000
+                  dostepneSrodki: 500000
+                  waluta: PLN
+                  status: AKTYWNA
+                  dataWydania: '2026-11-13T12:00:00.000Z'
+        '400':
+          $ref: '#/components/responses/BladWalidacji'
+        '401':
+          $ref: '#/components/responses/BrakUwierzytelnienia'
+        '403':
+          $ref: '#/components/responses/BrakUprawnien'
+        '404':
+          $ref: '#/components/responses/NieZnaleziono'
+        '409':
+          $ref: '#/components/responses/Konflikt'
+        '503':
+          $ref: '#/components/responses/SiecNiedostepna'
+
+  /karty/{idKarty}:
+    parameters:
+      - $ref: '#/components/parameters/IdKarty'
+    get:
+      tags: [Karty]
+      summary: Szczegóły karty
+      operationId: karta
+      responses:
+        '200':
+          description: Karta
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Karta'
+        '401':
+          $ref: '#/components/responses/BrakUwierzytelnienia'
+        '403':
+          $ref: '#/components/responses/BrakUprawnien'
+        '404':
+          $ref: '#/components/responses/NieZnaleziono'
+        '503':
+          $ref: '#/components/responses/SiecNiedostepna'
+
+  /karty/{idKarty}/limit:
+    parameters:
+      - $ref: '#/components/parameters/IdKarty'
+    put:
+      tags: [Karty]
+      summary: Zmiana limitu karty (FR6, operator)
+      operationId: zmienLimit
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ZmianaLimitu'
+            example:
+              limitKredytowy: 750000
+      responses:
+        '200':
+          description: Zmieniono
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Karta'
+        '400':
+          $ref: '#/components/responses/BladWalidacji'
+        '401':
+          $ref: '#/components/responses/BrakUwierzytelnienia'
+        '403':
+          $ref: '#/components/responses/BrakUprawnien'
+        '404':
+          $ref: '#/components/responses/NieZnaleziono'
+        '409':
+          $ref: '#/components/responses/Konflikt'
+        '503':
+          $ref: '#/components/responses/SiecNiedostepna'
+
+  /karty/{idKarty}/blokada:
+    parameters:
+      - $ref: '#/components/parameters/IdKarty'
+    post:
+      tags: [Karty]
+      summary: Blokada karty (FR6, operator)
+      operationId: zablokujKarte
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Zablokowano
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Karta'
+        '401':
+          $ref: '#/components/responses/BrakUwierzytelnienia'
+        '403':
+          $ref: '#/components/responses/BrakUprawnien'
+        '404':
+          $ref: '#/components/responses/NieZnaleziono'
+        '503':
+          $ref: '#/components/responses/SiecNiedostepna'
+
+  /karty/{idKarty}/odblokowanie:
+    parameters:
+      - $ref: '#/components/parameters/IdKarty'
+    post:
+      tags: [Karty]
+      summary: Odblokowanie karty (FR6, operator)
+      description: Niedozwolone, gdy klient jest zablokowany we wszystkich sieciach.
+      operationId: odblokujKarte
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Odblokowano
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Karta'
+        '401':
+          $ref: '#/components/responses/BrakUwierzytelnienia'
+        '403':
+          $ref: '#/components/responses/BrakUprawnien'
+        '404':
+          $ref: '#/components/responses/NieZnaleziono'
+        '409':
+          $ref: '#/components/responses/Konflikt'
+        '503':
+          $ref: '#/components/responses/SiecNiedostepna'
+
+  /transakcje:
+    get:
+      tags: [Transakcje]
+      summary: Przeglądanie i filtrowanie transakcji (FR8)
+      description: |
+        Operator widzi transakcje swojej sieci. Administrator bez filtra `siec` przeszukuje wszystkie węzły;
+        przy niedostępnym węźle wynik jest częściowy (`czesciowy: true`).
+      operationId: listaTransakcji
+      parameters:
+        - name: siec
+          in: query
+          schema:
+            $ref: '#/components/schemas/KodSieci'
+        - name: idKarty
+          in: query
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+        - name: idSklepu
+          in: query
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+        - name: rrn
+          in: query
+          schema:
+            $ref: '#/components/schemas/Rrn'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/StatusTransakcji'
+        - name: typ
+          in: query
+          schema:
+            $ref: '#/components/schemas/TypTransakcji'
+        - name: od
+          in: query
+          description: Początek okresu (włącznie)
+          schema:
+            type: string
+            format: date-time
+        - name: do
+          in: query
+          description: Koniec okresu (wyłącznie)
+          schema:
+            type: string
+            format: date-time
+        - name: kwotaOd
+          in: query
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+        - name: kwotaDo
+          in: query
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+        - name: sortuj
+          in: query
+          schema:
+            type: string
+            enum: [dataTransakcji, kwota]
+            default: dataTransakcji
+        - name: kierunek
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+        - $ref: '#/components/parameters/Strona'
+        - $ref: '#/components/parameters/Rozmiar'
+      responses:
+        '200':
+          description: Strona transakcji
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StronaTransakcji'
+        '400':
+          $ref: '#/components/responses/BladWalidacji'
+        '401':
+          $ref: '#/components/responses/BrakUwierzytelnienia'
+        '403':
+          $ref: '#/components/responses/BrakUprawnien'
+        '503':
+          $ref: '#/components/responses/SiecNiedostepna'
+
+  /transakcje/{idTransakcji}:
+    parameters:
+      - name: idTransakcji
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+    get:
+      tags: [Transakcje]
+      summary: Szczegóły transakcji z powiązanymi zwrotami
+      operationId: transakcja
+      responses:
+        '200':
+          description: Transakcja
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransakcjaSzczegoly'
+        '401':
+          $ref: '#/components/responses/BrakUwierzytelnienia'
+        '403':
+          $ref: '#/components/responses/BrakUprawnien'
+        '404':
+          $ref: '#/components/responses/NieZnaleziono'
+        '503':
+          $ref: '#/components/responses/SiecNiedostepna'
+
+  /raporty/obroty-sklepu:
+    get:
+      tags: [Raporty]
+      summary: Raport obrotów sklepu (FR9, administrator)
+      description: Odpytuje wszystkie węzły. Przy niedostępnym węźle zwraca raport częściowy.
+      operationId: raportObrotowSklepu
+      parameters:
+        - name: idSklepu
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+        - $ref: '#/components/parameters/OkresOd'
+        - $ref: '#/components/parameters/OkresDo'
+      responses:
+        '200':
+          description: Raport
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RaportObrotow'
+              example:
+                idSklepu: 1
+                nazwaSklepu: Elektro Śląsk
+                od: '2026-11-01T00:00:00.000Z'
+                do: '2026-12-01T00:00:00.000Z'
+                sieci:
+                  - siec: VISA
+                    liczbaAutoryzacji: 12
+                    sumaAutoryzacji: 1250000
+                    liczbaZwrotow: 1
+                    sumaZwrotow: 9999
+                  - siec: AMEX
+                    liczbaAutoryzacji: 3
+                    sumaAutoryzacji: 450000
+                    liczbaZwrotow: 0
+                    sumaZwrotow: 0
+                lacznie:
+                  siec: null
+                  liczbaAutoryzacji: 15
+                  sumaAutoryzacji: 1700000
+                  liczbaZwrotow: 1
+                  sumaZwrotow: 9999
+                czesciowy: true
+                brakujaceSieci: [MC]
+        '400':
+          $ref: '#/components/responses/BladWalidacji'
+        '401':
+          $ref: '#/components/responses/BrakUwierzytelnienia'
+        '403':
+          $ref: '#/components/responses/BrakUprawnien'
+        '404':
+          $ref: '#/components/responses/NieZnaleziono'
+
+  /raporty/statystyki-sieci:
+    get:
+      tags: [Raporty]
+      summary: Statystyki sieci (FR10, administrator)
+      operationId: statystykiSieci
+      parameters:
+        - $ref: '#/components/parameters/OkresOd'
+        - $ref: '#/components/parameters/OkresDo'
+      responses:
+        '200':
+          description: Statystyki
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatystykiSieci'
+        '400':
+          $ref: '#/components/responses/BladWalidacji'
+        '401':
+          $ref: '#/components/responses/BrakUwierzytelnienia'
+        '403':
+          $ref: '#/components/responses/BrakUprawnien'
+
+  /wezly/stan:
+    get:
+      tags: [Monitoring]
+      summary: Stan węzłów (FR11, administrator)
+      description: Lekki odczyt do odpytywania co kilka sekund; wynik jest buforowany przez 2 sekundy.
+      operationId: stanWezlow
+      responses:
+        '200':
+          description: Stan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StanWezlow'
+              example:
+                czasPomiaru: '2026-11-13T12:00:05.000Z'
+                wezly:
+                  - siec: VISA
+                    nrWezla: 1
+                    rola: GLOWNY
+                    dostepny: true
+                    czasOdpowiedziMs: 4
+                    logiMv:
+                      - tabela: KLIENT
+                        liczbaWierszy: 0
+                        rozmiarBajtow: 65536
+                    wiszaceTransakcje2pc: 0
+                    blad: null
+                  - siec: MC
+                    nrWezla: 2
+                    rola: REPLIKA
+                    dostepny: true
+                    czasOdpowiedziMs: 6
+                    replikacja:
+                      ostatnieOdswiezenie: '2026-11-13T12:00:00.000Z'
+                      opoznienieSekund: 5
+                      przekroczonoLimit: false
+                      ostatniBlad: null
+                    logiMv: null
+                    wiszaceTransakcje2pc: 0
+                    blad: null
+                  - siec: AMEX
+                    nrWezla: 3
+                    rola: REPLIKA
+                    dostepny: false
+                    czasOdpowiedziMs: null
+                    logiMv: null
+                    wiszaceTransakcje2pc: null
+                    blad: Węzeł niedostępny
+        '401':
+          $ref: '#/components/responses/BrakUwierzytelnienia'
+        '403':
+          $ref: '#/components/responses/BrakUprawnien'
+
+components:
+  securitySchemes:
+    kluczApiSklepu:
+      type: apiKey
+      in: header
+      name: X-Api-Key
+    tokenPanelu:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Unikalny klucz żądania zapisu (np. UUID); powtórzenie z tym samym kluczem zwraca zapisaną odpowiedź
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 64
+        pattern: '^[A-Za-z0-9._:-]+$'
+    Strona:
+      name: strona
+      in: query
+      description: Numer strony od 0
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+    Rozmiar:
+      name: rozmiar
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    IdKlienta:
+      name: idKlienta
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+    IdSklepu:
+      name: idSklepu
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+    IdKarty:
+      name: idKarty
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+    OkresOd:
+      name: od
+      in: query
+      required: true
+      description: Początek okresu (włącznie)
+      schema:
+        type: string
+        format: date-time
+    OkresDo:
+      name: do
+      in: query
+      required: true
+      description: Koniec okresu (wyłącznie)
+      schema:
+        type: string
+        format: date-time
+
+  headers:
+    RetryAfter:
+      description: Po ilu sekundach ponowić żądanie
+      schema:
+        type: integer
+
+  responses:
+    BladWalidacji:
+      description: Błędne dane żądania
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Blad'
+          example:
+            kod: WALIDACJA
+            komunikat: Nieprawidłowe dane żądania
+            szczegoly:
+              email: musi być poprawnym adresem e-mail
+    BladZadaniaPlatnosci:
+      description: Błędne dane płatności (kod 14 - numer karty, 13 - kwota)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Blad'
+          example:
+            kod: '14'
+            komunikat: Nieprawidłowy numer karty
+            szczegoly: null
+    BrakUwierzytelnienia:
+      description: Brak albo nieważny token lub klucz API
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Blad'
+          example:
+            kod: BRAK_UWIERZYTELNIENIA
+            komunikat: Wymagane uwierzytelnienie
+            szczegoly: null
+    BrakUprawnien:
+      description: Brak uprawnień do operacji albo do danych innej sieci
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Blad'
+          example:
+            kod: BRAK_UPRAWNIEN
+            komunikat: Brak uprawnień do danych tej sieci
+            szczegoly: null
+    NieZnaleziono:
+      description: Nie znaleziono
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Blad'
+          example:
+            kod: NIE_ZNALEZIONO
+            komunikat: Nie znaleziono zasobu
+            szczegoly: null
+    Konflikt:
+      description: |
+        Konflikt stanu: `94` (klucz idempotencji z innymi danymi), `REPLIKACJA_W_TOKU` (z nagłówkiem Retry-After),
+        `KLIENT_MA_AKTYWNE_KARTY`, `KLIENT_NIEAKTYWNY`, `LIMIT_PONIZEJ_WYKORZYSTANIA`, `DUPLIKAT`
+      headers:
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Blad'
+          example:
+            kod: KLIENT_MA_AKTYWNE_KARTY
+            komunikat: Klient ma aktywne karty
+            szczegoly: null
+    KonfliktPlatnosci:
+      description: '`94` - idZadania użyty z innymi danymi; `REPLIKACJA_W_TOKU` - dane sklepu jeszcze nie dotarły do węzła'
+      headers:
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Blad'
+          example:
+            kod: '94'
+            komunikat: Identyfikator żądania użyty z innymi danymi
+            szczegoly:
+              idZadania: zam-2026-000123
+    SiecNiedostepna:
+      description: Węzeł sieci niedostępny (kod 91); nic nie zostało zmienione
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Blad'
+          example:
+            kod: '91'
+            komunikat: Sieć niedostępna
+            szczegoly:
+              siec: MC
+    ZbytWieleProb:
+      description: Zbyt wiele nieudanych prób logowania
+      headers:
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Blad'
+          example:
+            kod: ZBYT_WIELE_PROB
+            komunikat: Zbyt wiele nieudanych prób logowania
+            szczegoly: null
+
+  schemas:
+    Blad:
+      type: object
+      required: [kod, komunikat]
+      properties:
+        kod:
+          type: string
+          description: |
+            Kody płatnicze ISO 8583: `13`, `14`, `91`, `94`, `96`. Pozostałe: `WALIDACJA`,
+            `BRAK_KLUCZA_IDEMPOTENCJI`, `BRAK_UWIERZYTELNIENIA`, `BRAK_UPRAWNIEN`, `NIE_ZNALEZIONO`,
+            `REPLIKACJA_W_TOKU`, `KLIENT_MA_AKTYWNE_KARTY`, `KLIENT_NIEAKTYWNY`, `LIMIT_PONIZEJ_WYKORZYSTANIA`,
+            `DUPLIKAT`, `ZBYT_WIELE_PROB`.
+        komunikat:
+          type: string
+        szczegoly:
+          type: object
+          nullable: true
+          additionalProperties: true
+
+    KodSieci:
+      type: string
+      enum: [VISA, MC, AMEX]
+    IdZadania:
+      type: string
+      minLength: 1
+      maxLength: 64
+      pattern: '^[A-Za-z0-9._:-]+$'
+    Rrn:
+      type: string
+      pattern: '^[0-9]{12}$'
+    Kwota:
+      type: integer
+      format: int64
+      minimum: 1
+      maximum: 9999999999
+      description: Kwota w groszach
+    Waluta:
+      type: string
+      pattern: '^[A-Z]{3}$'
+      example: PLN
+    StatusKlienta:
+      type: string
+      enum: [AKTYWNY, ZABLOKOWANY, USUNIETY]
+    StatusSklepu:
+      type: string
+      enum: [AKTYWNY, ZAWIESZONY, USUNIETY]
+    StatusKarty:
+      type: string
+      enum: [AKTYWNA, ZABLOKOWANA]
+    StatusTransakcji:
+      type: string
+      enum: [AUTORYZOWANA, ODRZUCONA, ZWROCONA]
+    TypTransakcji:
+      type: string
+      enum: [AUTORYZACJA, ZWROT]
+
+    ZadanieAutoryzacji:
+      type: object
+      required: [idZadania, numerKarty, kwota, waluta]
+      properties:
+        idZadania:
+          $ref: '#/components/schemas/IdZadania'
+        numerKarty:
+          type: string
+          pattern: '^[0-9]{12,19}$'
+          description: Pełny numer karty (PAN); nigdy nie jest zapisywany ani zwracany
+        kwota:
+          $ref: '#/components/schemas/Kwota'
+        waluta:
+          $ref: '#/components/schemas/Waluta'
+    ZadanieZwrotu:
+      type: object
+      required: [idZadania, rrnPierwotnej, kwota, waluta]
+      properties:
+        idZadania:
+          $ref: '#/components/schemas/IdZadania'
+        rrnPierwotnej:
+          $ref: '#/components/schemas/Rrn'
+        kwota:
+          $ref: '#/components/schemas/Kwota'
+        waluta:
+          $ref: '#/components/schemas/Waluta'
+    WynikPlatnosci:
+      type: object
+      required: [idZadania, decyzja, kod, komunikat, typ, kwota, waluta, powtorzona]
+      properties:
+        idZadania:
+          $ref: '#/components/schemas/IdZadania'
+        decyzja:
+          type: string
+          enum: [ZATWIERDZONA, ODRZUCONA]
+        kod:
+          type: string
+          description: |
+            Kod odpowiedzi ISO 8583 (pole 39): `00` zatwierdzona, `12` nieprawidłowa transakcja,
+            `13` nieprawidłowa kwota, `14` nieznana karta, `25` nie znaleziono transakcji pierwotnej,
+            `51` brak środków, `54` karta przeterminowana, `57` transakcja niedozwolona dla karty (waluta),
+            `62` karta zablokowana
+          enum: ['00', '12', '13', '14', '25', '51', '54', '57', '62']
+        komunikat:
+          type: string
+        rrn:
+          type: string
+          nullable: true
+          pattern: '^[0-9]{12}$'
+        typ:
+          $ref: '#/components/schemas/TypTransakcji'
+        kwota:
+          $ref: '#/components/schemas/Kwota'
+        waluta:
+          $ref: '#/components/schemas/Waluta'
+        siec:
+          type: string
+          nullable: true
+          enum: [VISA, MC, AMEX, null]
+          description: Sieć karty; null, gdy nie udało się jej ustalić (np. zwrot z nieznanym RRN)
+        numerKarty:
+          type: string
+          nullable: true
+          description: Maska numeru karty
+        statusTransakcji:
+          type: string
+          nullable: true
+          enum: [AUTORYZOWANA, ODRZUCONA, ZWROCONA, null]
+        dataTransakcji:
+          type: string
+          format: date-time
+          nullable: true
+        rrnPierwotnej:
+          type: string
+          nullable: true
+          pattern: '^[0-9]{12}$'
+        powtorzona:
+          type: boolean
+          description: true, gdy zwrócono zapisany wynik wcześniejszego żądania o tym samym idZadania
+
+    Logowanie:
+      type: object
+      required: [login, haslo]
+      properties:
+        login:
+          type: string
+          minLength: 1
+          maxLength: 50
+        haslo:
+          type: string
+          minLength: 1
+          maxLength: 200
+          format: password
+    TokenLogowania:
+      type: object
+      required: [token, typ, wygasa, uzytkownik]
+      properties:
+        token:
+          type: string
+        typ:
+          type: string
+          enum: [Bearer]
+        wygasa:
+          type: string
+          format: date-time
+        uzytkownik:
+          $ref: '#/components/schemas/Uzytkownik'
+    Uzytkownik:
+      type: object
+      required: [id, login, rola]
+      properties:
+        id:
+          type: integer
+          format: int64
+        login:
+          type: string
+        rola:
+          type: string
+          enum: [ADMIN, OPERATOR]
+        siec:
+          type: string
+          nullable: true
+          enum: [VISA, MC, AMEX, null]
+          description: Sieć operatora; null dla administratora
+
+    KlientDane:
+      type: object
+      required: [imie, nazwisko, email, kraj]
+      properties:
+        imie:
+          type: string
+          minLength: 1
+          maxLength: 50
+        nazwisko:
+          type: string
+          minLength: 1
+          maxLength: 80
+        email:
+          type: string
+          format: email
+          maxLength: 120
+        telefon:
+          type: string
+          nullable: true
+          pattern: '^\+?[0-9 ]{7,20}$'
+        kraj:
+          type: string
+          pattern: '^[A-Z]{2}$'
+    KlientZmiana:
+      allOf:
+        - $ref: '#/components/schemas/KlientDane'
+        - type: object
+          required: [status]
+          properties:
+            status:
+              type: string
+              enum: [AKTYWNY, ZABLOKOWANY]
+    Klient:
+      type: object
+      required: [id, imie, nazwisko, email, kraj, dataRejestracji, status]
+      properties:
+        id:
+          type: integer
+          format: int64
+        imie:
+          type: string
+        nazwisko:
+          type: string
+        email:
+          type: string
+        telefon:
+          type: string
+          nullable: true
+        kraj:
+          type: string
+        dataRejestracji:
+          type: string
+          format: date-time
+        status:
+          $ref: '#/components/schemas/StatusKlienta'
+    WynikBlokadyGlobalnej:
+      type: object
+      required: [idKlienta, zablokowaneKarty]
+      properties:
+        idKlienta:
+          type: integer
+          format: int64
+        zablokowaneKarty:
+          type: object
+          description: Liczba zablokowanych kart w każdej sieci
+          additionalProperties:
+            type: integer
+
+    SklepDane:
+      type: object
+      required: [nazwa, nip, kategoriaMcc, emailKontaktowy]
+      properties:
+        nazwa:
+          type: string
+          minLength: 1
+          maxLength: 100
+        nip:
+          type: string
+          pattern: '^[0-9]{10}$'
+          description: NIP z poprawną cyfrą kontrolną
+        kategoriaMcc:
+          type: string
+          pattern: '^[0-9]{4}$'
+        url:
+          type: string
+          nullable: true
+          maxLength: 200
+        emailKontaktowy:
+          type: string
+          format: email
+          maxLength: 120
+    SklepZmiana:
+      allOf:
+        - $ref: '#/components/schemas/SklepDane'
+        - type: object
+          required: [status]
+          properties:
+            status:
+              type: string
+              enum: [AKTYWNY, ZAWIESZONY]
+    Sklep:
+      type: object
+      required: [id, nazwa, nip, kategoriaMcc, emailKontaktowy, status, maKluczApi]
+      properties:
+        id:
+          type: integer
+          format: int64
+        nazwa:
+          type: string
+        nip:
+          type: string
+        kategoriaMcc:
+          type: string
+        url:
+          type: string
+          nullable: true
+        emailKontaktowy:
+          type: string
+        status:
+          $ref: '#/components/schemas/StatusSklepu'
+        maKluczApi:
+          type: boolean
+    NowyKluczApi:
+      type: object
+      required: [idSklepu]
+      properties:
+        idSklepu:
+          type: integer
+          format: int64
+        kluczApi:
+          type: string
+          nullable: true
+          description: Klucz pokazywany tylko raz; null przy powtórzeniu żądania
+
+    KartaNowa:
+      type: object
+      required: [idKlienta, limitKredytowy]
+      properties:
+        idKlienta:
+          type: integer
+          format: int64
+          minimum: 1
+        limitKredytowy:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9999999999
+          description: Limit w groszach
+        waluta:
+          type: string
+          pattern: '^[A-Z]{3}$'
+          default: PLN
+        miesiaceWaznosci:
+          type: integer
+          minimum: 1
+          maximum: 60
+          default: 36
+    ZmianaLimitu:
+      type: object
+      required: [limitKredytowy]
+      properties:
+        limitKredytowy:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9999999999
+    Karta:
+      type: object
+      required: [id, idKlienta, siec, numerKarty, dataWaznosci, limitKredytowy, dostepneSrodki, waluta, status, dataWydania]
+      properties:
+        id:
+          type: integer
+          format: int64
+        idKlienta:
+          type: integer
+          format: int64
+        siec:
+          $ref: '#/components/schemas/KodSieci'
+        numerKarty:
+          type: string
+          description: Maska numeru karty
+        dataWaznosci:
+          type: string
+          pattern: '^[0-9]{4}-[0-9]{2}$'
+        limitKredytowy:
+          type: integer
+          format: int64
+        dostepneSrodki:
+          type: integer
+          format: int64
+        waluta:
+          type: string
+        status:
+          $ref: '#/components/schemas/StatusKarty'
+        dataWydania:
+          type: string
+          format: date-time
+    KartaWydana:
+      type: object
+      required: [karta]
+      properties:
+        numerKarty:
+          type: string
+          nullable: true
+          description: Pełny numer karty pokazywany tylko raz; null przy powtórzeniu żądania
+        karta:
+          $ref: '#/components/schemas/Karta'
+    ListaKart:
+      type: object
+      required: [elementy, czesciowy, brakujaceSieci]
+      properties:
+        elementy:
+          type: array
+          items:
+            $ref: '#/components/schemas/Karta'
+        czesciowy:
+          type: boolean
+        brakujaceSieci:
+          type: array
+          items:
+            $ref: '#/components/schemas/KodSieci'
+
+    Transakcja:
+      type: object
+      required: [id, siec, idKarty, idSklepu, idZadania, rrn, typ, kwota, waluta, dataTransakcji, status, kod, komunikat]
+      properties:
+        id:
+          type: integer
+          format: int64
+        siec:
+          $ref: '#/components/schemas/KodSieci'
+        idKarty:
+          type: integer
+          format: int64
+        numerKarty:
+          type: string
+          nullable: true
+        idSklepu:
+          type: integer
+          format: int64
+        idZadania:
+          type: string
+        rrn:
+          $ref: '#/components/schemas/Rrn'
+        typ:
+          $ref: '#/components/schemas/TypTransakcji'
+        kwota:
+          type: integer
+          format: int64
+        waluta:
+          type: string
+        dataTransakcji:
+          type: string
+          format: date-time
+        status:
+          $ref: '#/components/schemas/StatusTransakcji'
+        kod:
+          type: string
+        komunikat:
+          type: string
+        idTransakcjiPierwotnej:
+          type: integer
+          format: int64
+          nullable: true
+    TransakcjaSzczegoly:
+      type: object
+      description: Pole `pierwotna` występuje tylko dla zwrotu
+      required: [transakcja, zwroty]
+      properties:
+        transakcja:
+          $ref: '#/components/schemas/Transakcja'
+        pierwotna:
+          $ref: '#/components/schemas/Transakcja'
+        zwroty:
+          type: array
+          items:
+            $ref: '#/components/schemas/Transakcja'
+
+    StronaBazowa:
+      type: object
+      required: [strona, rozmiar, lacznie, czesciowy, brakujaceSieci]
+      properties:
+        strona:
+          type: integer
+        rozmiar:
+          type: integer
+        lacznie:
+          type: integer
+          format: int64
+        zrodlo:
+          type: string
+          nullable: true
+          description: Węzeł, z którego odczytano dane wspólne (VISA albo replika)
+        czesciowy:
+          type: boolean
+        brakujaceSieci:
+          type: array
+          items:
+            $ref: '#/components/schemas/KodSieci'
+    StronaKlientow:
+      allOf:
+        - $ref: '#/components/schemas/StronaBazowa'
+        - type: object
+          required: [elementy]
+          properties:
+            elementy:
+              type: array
+              items:
+                $ref: '#/components/schemas/Klient'
+    StronaSklepow:
+      allOf:
+        - $ref: '#/components/schemas/StronaBazowa'
+        - type: object
+          required: [elementy]
+          properties:
+            elementy:
+              type: array
+              items:
+                $ref: '#/components/schemas/Sklep'
+    StronaKart:
+      allOf:
+        - $ref: '#/components/schemas/StronaBazowa'
+        - type: object
+          required: [elementy]
+          properties:
+            elementy:
+              type: array
+              items:
+                $ref: '#/components/schemas/Karta'
+    StronaTransakcji:
+      allOf:
+        - $ref: '#/components/schemas/StronaBazowa'
+        - type: object
+          required: [elementy]
+          properties:
+            elementy:
+              type: array
+              items:
+                $ref: '#/components/schemas/Transakcja'
+
+    ObrotySieci:
+      type: object
+      required: [liczbaAutoryzacji, sumaAutoryzacji, liczbaZwrotow, sumaZwrotow]
+      properties:
+        siec:
+          type: string
+          nullable: true
+          enum: [VISA, MC, AMEX, null]
+        liczbaAutoryzacji:
+          type: integer
+          format: int64
+        sumaAutoryzacji:
+          type: integer
+          format: int64
+        liczbaZwrotow:
+          type: integer
+          format: int64
+        sumaZwrotow:
+          type: integer
+          format: int64
+    RaportObrotow:
+      type: object
+      required: [idSklepu, nazwaSklepu, od, do, sieci, lacznie, czesciowy, brakujaceSieci]
+      properties:
+        idSklepu:
+          type: integer
+          format: int64
+        nazwaSklepu:
+          type: string
+        od:
+          type: string
+          format: date-time
+        do:
+          type: string
+          format: date-time
+        sieci:
+          type: array
+          items:
+            $ref: '#/components/schemas/ObrotySieci'
+        lacznie:
+          $ref: '#/components/schemas/ObrotySieci'
+        czesciowy:
+          type: boolean
+        brakujaceSieci:
+          type: array
+          items:
+            $ref: '#/components/schemas/KodSieci'
+    StatystykaSieci:
+      type: object
+      required: [siec, liczbaTransakcji, sumaKwot, liczbaOdrzuconych, odsetekOdrzuconych]
+      properties:
+        siec:
+          $ref: '#/components/schemas/KodSieci'
+        liczbaTransakcji:
+          type: integer
+          format: int64
+        sumaKwot:
+          type: integer
+          format: int64
+          description: Suma kwot zatwierdzonych autoryzacji w groszach
+        liczbaOdrzuconych:
+          type: integer
+          format: int64
+        odsetekOdrzuconych:
+          type: number
+          format: double
+          description: Odsetek odrzuconych autoryzacji (0-100)
+    StatystykiSieci:
+      type: object
+      required: [od, do, sieci, czesciowy, brakujaceSieci]
+      properties:
+        od:
+          type: string
+          format: date-time
+        do:
+          type: string
+          format: date-time
+        sieci:
+          type: array
+          items:
+            $ref: '#/components/schemas/StatystykaSieci'
+        czesciowy:
+          type: boolean
+        brakujaceSieci:
+          type: array
+          items:
+            $ref: '#/components/schemas/KodSieci'
+
+    StanReplikacji:
+      type: object
+      required: [przekroczonoLimit]
+      properties:
+        ostatnieOdswiezenie:
+          type: string
+          format: date-time
+          nullable: true
+        opoznienieSekund:
+          type: integer
+          format: int64
+          nullable: true
+        przekroczonoLimit:
+          type: boolean
+          description: true, gdy repliki są starsze niż 60 s (NFR5)
+        ostatniBlad:
+          type: object
+          nullable: true
+          properties:
+            czas:
+              type: string
+              format: date-time
+            komunikat:
+              type: string
+    LogMv:
+      type: object
+      required: [tabela, liczbaWierszy, rozmiarBajtow]
+      properties:
+        tabela:
+          type: string
+        liczbaWierszy:
+          type: integer
+          format: int64
+        rozmiarBajtow:
+          type: integer
+          format: int64
+    StanWezla:
+      type: object
+      description: Pole `replikacja` występuje tylko dla dostępnych replik; `logiMv` tylko dla węzła głównego
+      required: [siec, nrWezla, rola, dostepny]
+      properties:
+        siec:
+          $ref: '#/components/schemas/KodSieci'
+        nrWezla:
+          type: integer
+        rola:
+          type: string
+          enum: [GLOWNY, REPLIKA]
+        dostepny:
+          type: boolean
+        czasOdpowiedziMs:
+          type: integer
+          format: int64
+          nullable: true
+        replikacja:
+          $ref: '#/components/schemas/StanReplikacji'
+        logiMv:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/LogMv'
+        wiszaceTransakcje2pc:
+          type: integer
+          nullable: true
+        blad:
+          type: string
+          nullable: true
+    StanWezlow:
+      type: object
+      required: [czasPomiaru, wezly]
+      properties:
+        czasPomiaru:
+          type: string
+          format: date-time
+        wezly:
+          type: array
+          items:
+            $ref: '#/components/schemas/StanWezla'

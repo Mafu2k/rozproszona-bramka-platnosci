@@ -1,0 +1,22 @@
+DECLARE
+    v_istnieje NUMBER;
+BEGIN
+    SELECT COUNT(*) INTO v_istnieje FROM user_scheduler_jobs WHERE job_name = 'ODSWIEZ_DANE_WSPOLNE';
+    IF v_istnieje > 0 THEN
+        DBMS_SCHEDULER.DROP_JOB('ODSWIEZ_DANE_WSPOLNE', force => TRUE);
+    END IF;
+    SELECT COUNT(*) INTO v_istnieje FROM user_refresh WHERE rname = 'GRP_DANE_WSPOLNE';
+    IF v_istnieje > 0 THEN
+        DBMS_REFRESH.DESTROY('GRP_DANE_WSPOLNE');
+    END IF;
+END;
+/
+DROP MATERIALIZED VIEW IF EXISTS uzytkownik;
+DROP MATERIALIZED VIEW IF EXISTS sklep;
+DROP MATERIALIZED VIEW IF EXISTS klient;
+DROP MATERIALIZED VIEW IF EXISTS zakres_bin;
+DROP MATERIALIZED VIEW IF EXISTS siec_kartowa;
+DROP SYNONYM IF EXISTS klient_master;
+DROP DATABASE LINK IF EXISTS visa;
+DELETE FROM "flyway_schema_history" WHERE "version" = '1';
+COMMIT;
